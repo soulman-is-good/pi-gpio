@@ -1,179 +1,203 @@
 "use strict";
 var fs = require("fs"),
-	path = require("path"),
-	exec = require("child_process").exec;
+  path = require("path"),
+  exec = require("child_process").exec;
 
 var gpioAdmin = "gpio-admin",
-	sysFsPath = "/sys/devices/virtual/gpio";
+  sysFsPath = "/sys/devices/virtual/gpio";
 
-var rev = fs.readFileSync("/proc/cpuinfo").toString().split("\n").filter(function(line) {
-	return line.indexOf("Revision") == 0;
+var rev = fs.readFileSync("/proc/cpuinfo").toString().split("\n").filter(function (line) {
+  return line.indexOf("Revision") == 0;
 })[0].split(":")[1].trim();
 
 rev = parseInt(rev, 16) < 3 ? 1 : 2; // http://elinux.org/RPi_HardwareHistory#Board_Revision_History
 
 var pinMapping = {
-	"3": 0,
-	"5": 1,
-	"7": 4,
-	"8": 14,
-	"10": 15,
-	"11": 17,
-	"12": 18,
-	"13": 21,
-	"15": 22,
-	"16": 23,
-	"18": 24,
-	"19": 10,
-	"21": 9,
-	"22": 25,
-	"23": 11,
-	"24": 8,
-	"26": 7,
-
-	// Model B+ pins
-	"29": 5,
-	"31": 6,
-	"32": 12,
-	"33": 13,
-	"35": 19,
-	"36": 16,
-	"37": 26,
-	"38": 20,
-	"40": 21
+  "3": 0,
+  "5": 1,
+  "7": 4,
+  "8": 14,
+  "10": 15,
+  "11": 17,
+  "12": 18,
+  "13": 21,
+  "15": 22,
+  "16": 23,
+  "18": 24,
+  "19": 10,
+  "21": 9,
+  "22": 25,
+  "23": 11,
+  "24": 8,
+  "26": 7,
+  // Model B+ pins
+  "29": 5,
+  "31": 6,
+  "32": 12,
+  "33": 13,
+  "35": 19,
+  "36": 16,
+  "37": 26,
+  "38": 20,
+  "40": 21
 };
 
-if(rev == 2) {
-	pinMapping["3"] = 2;
-	pinMapping["5"] = 3;
-	pinMapping["13"] = 27;
+if (rev == 2) {
+  pinMapping["3"] = 2;
+  pinMapping["5"] = 3;
+  pinMapping["13"] = 27;
 }
 
-function isNumber(number) {
-	return !isNaN(parseInt(number, 10));
+function isNumber (number) {
+  return !isNaN(parseInt(number, 10));
 }
 
-function noop(){}
-
-function handleExecResponse(method, pinNumber, callback) {
-	return function(err, stdout, stderr) {
-		if(err) {
-			console.error("Error when trying to", method, "pin", pinNumber);
-			console.error(stderr);
-			callback(err);
-		} else {
-			callback();
-		}
-	}
+function noop () {
 }
 
-function sanitizePinNumber(pinNumber) {
-	if(!isNumber(pinNumber) || !isNumber(pinMapping[pinNumber])) {
-		throw new Error("Pin number isn't valid");
-	}
-
-	return parseInt(pinNumber, 10);
+function handleExecResponse (method, pinNumber, callback) {
+  return function (err, stdout, stderr) {
+    if (err) {
+      console.error("Error when trying to", method, "pin", pinNumber);
+      console.error(stderr);
+      callback(err);
+    } else {
+      callback();
+    }
+  };
 }
 
-function sanitizeDirection(direction) {
-	direction = (direction || "").toLowerCase().trim();
-	if(direction === "in" || direction === "input") {
-		return "in";
-	} else if(direction === "out" || direction === "output" || !direction) {
-		return "out";
-	} else {
-		throw new Error("Direction must be 'input' or 'output'");
-	}
+function sanitizePinNumber (pinNumber) {
+  if (!isNumber(pinNumber) || !isNumber(pinMapping[pinNumber])) {
+    throw new Error("Pin number isn't valid");
+  }
+
+  return parseInt(pinNumber, 10);
 }
 
-function sanitizeOptions(options) {
-	var sanitized = {};
+function sanitizeDirection (direction) {
+  direction = (direction || "").toLowerCase().trim();
+  if (direction === "in" || direction === "input") {
+    return "in";
+  } else if (direction === "out" || direction === "output" || !direction) {
+    return "out";
+  } else {
+    throw new Error("Direction must be 'input' or 'output'");
+  }
+}
 
-	options.split(" ").forEach(function(token) {
-		if(token == "in" || token == "input") {
-			sanitized.direction = "in";
-		}
+function sanitizeOptions (options) {
+  var sanitized = {};
 
-		if(token == "pullup" || token == "up") {
-			sanitized.pull = "pullup";
-		}
+  options.split(" ").forEach(function (token) {
+    if (token == "in" || token == "input") {
+      sanitized.direction = "in";
+    }
 
-		if(token == "pulldown" || token == "down") {
-			sanitized.pull = "pulldown";
-		}
-	});
+    if (token == "pullup" || token == "up") {
+      sanitized.pull = "pullup";
+    }
 
-	if(!sanitized.direction) {
-		sanitized.direction = "out";
-	}
+    if (token == "pulldown" || token == "down") {
+      sanitized.pull = "pulldown";
+    }
+  });
 
-	if(!sanitized.pull) {
-		sanitized.pull = "";
-	}
+  if (!sanitized.direction) {
+    sanitized.direction = "out";
+  }
 
-	return sanitized;
+  if (!sanitized.pull) {
+    sanitized.pull = "";
+  }
+
+  return sanitized;
+}
+
+function exportPin (pinNumber, options, callback) {
+  pinNumber = sanitizePinNumber(pinNumber);
+  options = sanitizeOptions(options);
+
+  exec(gpioAdmin + " export " + pinMapping[pinNumber] + " " + options.pull, handleExecResponse("open", pinNumber, function (err) {
+    if (err)
+      return (callback || noop)(err);
+
+    gpio.setDirection(pinNumber, options.direction, callback);
+  }));
+}
+
+function unexportPin (pinNumber, callback) {
+  pinNumber = sanitizePinNumber(pinNumber);
+
+  exec(gpioAdmin + " unexport " + pinMapping[pinNumber], handleExecResponse("close", pinNumber, callback || noop));
 }
 
 var gpio = {
-	rev: rev,
-	
-	open: function(pinNumber, options, callback) {
-		pinNumber = sanitizePinNumber(pinNumber);
+  rev: rev,
+  open: function (pinNumber, options, callback) {
+    pinNumber = sanitizePinNumber(pinNumber);
 
-		if(!callback && typeof options === "function") {
-			callback = options;
-			options = "out";
-		}
+    if (!callback && typeof options === "function") {
+      callback = options;
+      options = "out";
+    }
 
-		options = sanitizeOptions(options);
+    fs.exists(sysFsPath + "/gpio" + pinMapping[pinNumber], function (exists) {
+      if (exists) {
+        unexportPin(pinNumber, function () {
+          exportPin(pinNumber, options, callback);
+        });
+      } else {
+        exportPin(pinNumber, options, callback);
+      }
+    });
+  },
+  setDirection: function (pinNumber, direction, callback) {
+    pinNumber = sanitizePinNumber(pinNumber);
+    direction = sanitizeDirection(direction);
 
-		exec(gpioAdmin + " export " + pinMapping[pinNumber] + " " + options.pull, handleExecResponse("open", pinNumber, function(err) {
-			if(err) return (callback || noop)(err);
+    fs.writeFile(sysFsPath + "/gpio" + pinMapping[pinNumber] + "/direction", direction, (callback || noop));
+  },
+  getDirection: function (pinNumber, callback) {
+    pinNumber = sanitizePinNumber(pinNumber);
+    callback = callback || noop;
 
-			gpio.setDirection(pinNumber, options.direction, callback);
-		}));
-	},
+    fs.readFile(sysFsPath + "/gpio" + pinMapping[pinNumber] + "/direction", "utf8", function (err, direction) {
+      if (err)
+        return callback(err);
+      callback(null, sanitizeDirection(direction.trim()));
+    });
+  },
+  close: function (pinNumber, callback) {
+    pinNumber = sanitizePinNumber(pinNumber);
 
-	setDirection: function(pinNumber, direction, callback) {
-		pinNumber = sanitizePinNumber(pinNumber);
-		direction = sanitizeDirection(direction);
+    fs.exists(sysFsPath + "/gpio" + pinMapping[pinNumber], function (exists) {
+      if (exists) {
+        unexportPin(pinNumber, callback);
+      } else {
+        process.nextTick(function(){
+          (callback || noop)();
+        });
+      }
+    });
+  },
+  read: function (pinNumber, callback) {
+    pinNumber = sanitizePinNumber(pinNumber);
 
-		fs.writeFile(sysFsPath + "/gpio" + pinMapping[pinNumber] + "/direction", direction, (callback || noop));
-	},
+    fs.readFile(sysFsPath + "/gpio" + pinMapping[pinNumber] + "/value", function (err, data) {
+      if (err)
+        return (callback || noop)(err);
 
-	getDirection: function(pinNumber, callback) {
-		pinNumber = sanitizePinNumber(pinNumber);
-		callback = callback || noop;
+      (callback || noop)(null, parseInt(data, 10));
+    });
+  },
+  write: function (pinNumber, value, callback) {
+    pinNumber = sanitizePinNumber(pinNumber);
 
-		fs.readFile(sysFsPath + "/gpio" + pinMapping[pinNumber] + "/direction", "utf8", function(err, direction) {
-			if(err) return callback(err);
-			callback(null, sanitizeDirection(direction.trim()));
-		});
-	},
+    value = !!value ? "1" : "0";
 
-	close: function(pinNumber, callback) {
-		pinNumber = sanitizePinNumber(pinNumber);
-
-		exec(gpioAdmin + " unexport " + pinMapping[pinNumber], handleExecResponse("close", pinNumber, callback || noop));
-	},
-
-	read: function(pinNumber, callback) {
-		pinNumber = sanitizePinNumber(pinNumber);
-
-		fs.readFile(sysFsPath + "/gpio" + pinMapping[pinNumber] + "/value", function(err, data) {
-			if(err) return (callback || noop)(err);
-
-			(callback || noop)(null, parseInt(data, 10));
-		});
-	},
-
-	write: function(pinNumber, value, callback) {
-		pinNumber = sanitizePinNumber(pinNumber);
-
-		value = !!value?"1":"0";
-
-		fs.writeFile(sysFsPath + "/gpio" + pinMapping[pinNumber] + "/value", value, "utf8", callback);
-	}
+    fs.writeFile(sysFsPath + "/gpio" + pinMapping[pinNumber] + "/value", value, "utf8", callback);
+  }
 };
 
 gpio.export = gpio.open;
